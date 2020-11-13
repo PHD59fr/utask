@@ -9,6 +9,7 @@ import (
 	"github.com/ovh/utask/pkg/notify"
 	"github.com/ovh/utask/pkg/notify/slack"
 	"github.com/ovh/utask/pkg/notify/tat"
+	"github.com/ovh/utask/pkg/notify/webhook"
 )
 
 const (
@@ -46,6 +47,14 @@ func Init(store *configstore.Store) error {
 				return fmt.Errorf("%s: %s, %s", errRetrieveCfg, ncfg.Type, name)
 			}
 			sn := slack.NewSlackNotificationSender(f.WebhookURL)
+			notify.RegisterSender(sn, name)
+
+		case webhook.Type:
+			f := utask.NotifyBackendWebhook{}
+			if err := json.Unmarshal(ncfg.Config, &f); err != nil {
+				return fmt.Errorf("%s: %s, %s", errRetrieveCfg, ncfg.Type, name)
+			}
+			sn := webhook.NewWebhookNotificationSender(f.WebhookURL, f.Username, f.Password)
 			notify.RegisterSender(sn, name)
 
 		default:

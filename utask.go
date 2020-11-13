@@ -134,6 +134,13 @@ type NotifyBackendSlack struct {
 	WebhookURL string `json:"webhook_url"`
 }
 
+// NotifyBackendWebhook holds configuration for instantiating a Webhook notify client
+type NotifyBackendWebhook struct {
+	WebhookURL string `json:"webhook_url"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+}
+
 // NotifyActions holds configuration of each actions
 // By default all the actions are enabled /w any config name registered
 type NotifyActions struct {
