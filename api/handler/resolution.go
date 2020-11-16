@@ -252,7 +252,23 @@ func RunResolution(c *gin.Context, in *runResolutionIn) error {
 
 	logrus.WithFields(logrus.Fields{"resolution_id": r.PublicID}).Debugf("Handler RunResolution: manual resolve %s", r.PublicID)
 
-	return engine.GetEngine().Resolve(in.PublicID, nil)
+	ch := make(chan struct{})
+	go func() {
+		err = engine.GetEngine().Resolve(in.PublicID, nil)
+		ch <- struct{}{}
+	}()
+
+	chTimeout := time.After(5 * time.Second)
+
+	// manual resolution can be blocked by a lock acquisition on the Execution pool
+	// waiting for 5 seconds to get a response, otherwise let's consider the task will
+	// start correctly when the Execution pool gets available, and prevent API thread to be blocked
+	select {
+	case <-ch:
+		return err
+	case <-chTimeout:
+		return nil
+	}
 }
 
 type extendResolutionIn struct {

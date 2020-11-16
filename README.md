@@ -332,6 +332,7 @@ Note that the operators `IN` and `NOTIN` expect a list of acceptable values in t
 - `dependencies`: a list of step names on which this step waits before running
 - `custom_states`: a list of personnalised allowed state for this step (can be assigned to the state's step using `conditions`)
 - `retry_pattern`: (`seconds`, `minutes`, `hours`) define on what temporal order of magnitude the re-runs of this step should be spread (default = `seconds`)
+- `resources`: a list of resources that will be used during the step execution, to control and limit the concurrent execution of the step (more information in [the resources section](#resources)).
 
 <p align="center">
 <img src="./assets/img/utask_backoff.png" width="70%">
@@ -456,14 +457,16 @@ The `pre_hook` field of a step can be set to define an action that is executed b
 doSomeAuthPost:
   pre_hook:
     type: http
-    method: "GET"
-    url: "https://myAwesomeApi/otp"
+    configuration:
+      method: "GET"
+      url: "https://example.org/otp"
   action:
     type: http
-    method: "POST"
-    url: "https://myAwesomeApi/doSomePost"
-    headers:
-      X-Otp: "{{ .pre_hook.output }}"
+    configuration:
+      method: "POST"
+      url: "https://example.org/doSomePost"
+      headers:
+        X-Otp: "{{ .pre_hook.output }}"
 ```
 
 #### Functions <a name="functions"></a>
@@ -562,6 +565,34 @@ This output can be then passed to another step in json format:
 ```yaml
 foreach: '{{.step.prefixStrings.children | toJson}}'
 ```
+
+#### Resources <a name="resources"></a>
+
+Resources is a way to limit the number of concurrent execution of tasks or steps within an µTask instance. When a lot of tasks are launched at the same time, a high throughput from µTask can hurt some components of your infrastructure, making them unavailable.
+
+Defining `resources` on a µTask instance, on a template, or a step is a way to limit the number of concurrent executions on µTask side, to make sure that the targetted component stays healthy.
+
+µTask comes with some default resources: builtin plugins declares some resources, which can be throttled at usage, in the µTask configuration. For example, the `http` plugin declares two resources: `socket` and `url:example.org` (with `example.org` being the hostname of the destination). If you want to limit the maximum outgoing open socket on a µTask instance, you can add a `resource_limits` for `socket` in the configuration, the value being the number of concurrent usage allowed per instance.
+
+It's also possible to declare a `resource` on a step, inside the template.
+
+```yaml
+steps:
+  foobar:
+    description: A dummy step, that should not execute in parallel
+    resources: [limitedResourceFoobar]
+    action:
+      type: echo
+      configuration:
+        output:
+          foobar: fuzz
+```
+
+Every time the step `foobar` will be executed, µTask engine will verify that the maximum concurrent limit is not exceeded, and acquire one slot. This slot will be held until the step finishes its execution. If all slots for a resource are held, then the current execution will wait until one slot is released, or if the timeout is reached (defined in `resource_acquire_timeout` configuration, or default `1 minute`). If the resource is not declared in the `resource_limits` configuration, then, no limitation will be applied. If the limit value is set to `0`, then, the step will not wait and will be set to state `TO_RETRY` to be scheduled later.
+
+Templates declare a builtin resource, named `template:my-template-name` (with `my-template-name` being the template name): this allows to limit the number of concurrent execution of tasks from the given template. In that way, a way that consumes a lot of CPU/RAM/IO can be restrained to save the system resources or to disable completely the execution of tasks from a given template.
+
+Each builtin resources are documented in the plugins `README.md` file.
 
 ### Task templates validation
 

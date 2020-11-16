@@ -36,8 +36,8 @@ var (
 	eng Engine
 
 	// Used for stopping the current Engine
-	stopRunningSteps chan struct{}
-	gracePeriodEnd   chan struct{}
+	shutdownCtx    context.Context
+	gracePeriodEnd chan struct{}
 )
 
 // Engine is the heart of utask: it is the active process
@@ -93,13 +93,11 @@ func Init(ctx context.Context, wg *sync.WaitGroup, store *configstore.Store) err
 	}
 
 	// channels for handling graceful shutdown
-	stopRunningSteps = make(chan struct{})
+	shutdownCtx = ctx
 	gracePeriodEnd = make(chan struct{})
 	eng.wg = wg
 	go func() {
-		<-ctx.Done()
-		// Stop running new steps
-		close(stopRunningSteps)
+		<-shutdownCtx.Done()
 
 		// Wait for the grace period to end
 		time.Sleep(3 * time.Second)
@@ -211,14 +209,40 @@ func (e Engine) launchResolution(publicID string, async bool, sm *semaphore.Weig
 
 	res.Values.SetConfig(e.config)
 
-	// all ready, run remaining steps
-
-	utask.AcquireExecutionSlot()
-
+	// checking if all resources are available before starting the resolution
+	// first, checking if we have a custom semaphore, for example, crashed instance recover
+	// putting this semaphore first, cause the crashed instance limitation is always lower than the execution pool
 	if sm != nil {
-		sm.Acquire(context.Background(), 1)
+		if err := sm.Acquire(shutdownCtx, 1); err != nil {
+			debugLogger.Debugf("Engine: launchResolution() %s acquire resource: instance is shutting down", res.PublicID)
+			return nil, errors.New("instance is shutting down")
+		}
+	}
+	// second, checking if we have restricted resource on the given template
+	// template could be completely desactivated, as a "dead resource", if it's the case, we need to exit because
+	// the limit won't change until instance rebooted
+	if acquiredErr := utask.AcquireResource(shutdownCtx, "template:"+t.TemplateName); acquiredErr != nil {
+		if shutdownCtx.Err() != nil {
+			debugLogger.Debugf("Engine: launchResolution() %s acquire resource: instance is shutting down", res.PublicID)
+			return nil, errors.New("instance is shutting down")
+		}
+		debugLogger.Debugf("Engine: launchResolution() %s acquire resource %q: failed to acquire resource", res.PublicID, "template:"+t.TemplateName)
+		// otherwise, we either reached timeout on the lock for template, or the template is a "dead resource"
+		t.SetState(task.StateBlocked)
+		res.SetNextRetry(time.Now().Add(10 * time.Minute))
+		res.SetState(resolution.StateToAutorunDelayed)
+		if err := commit(dbp, res, t); err != nil {
+			debugLogger.Debugf("Engine: launchResolution() %s acquire resource, FAILED TO COMMIT RESOLUTION: %s", res.PublicID, err)
+		}
+		return nil, fmt.Errorf("can't acquire lock for template %q: %s", t.TemplateName, err)
+	}
+	// finally, acquire the execution slot
+	if acquiredErr := utask.AcquireExecutionSlot(shutdownCtx); acquiredErr != nil {
+		debugLogger.Debugf("Engine: launchResolution() %s acquire resource: instance is shutting down", res.PublicID)
+		return nil, errors.New("instance is shutting down")
 	}
 
+	// all ready, run remaining steps
 	recap := make([]string, 0)
 	for name, s := range res.Steps {
 		recap = append(recap, fmt.Sprintf("step %s = %s", name, s.State))
@@ -423,7 +447,7 @@ func resolve(dbp zesty.DBProvider, res *resolution.Resolution, t *task.Task, sm 
 
 	inShutdown := false
 	select {
-	case <-stopRunningSteps:
+	case <-shutdownCtx.Done():
 		inShutdown = true
 	default:
 	}
@@ -530,6 +554,7 @@ func resolve(dbp zesty.DBProvider, res *resolution.Resolution, t *task.Task, sm 
 		sm.Release(1)
 	}
 
+	utask.ReleaseResource("template:" + t.TemplateName)
 	utask.ReleaseExecutionSlot()
 	if err := resumeParentTask(dbp, t, sm, debugLogger); err != nil {
 		debugLogger.WithError(err).Debugf("Engine: resolver(): failed to resume parent task: %s", err)
@@ -595,7 +620,7 @@ func runAvailableSteps(dbp zesty.DBProvider, modifiedSteps map[string]bool, res 
 	expanded := 0
 
 	select {
-	case <-stopRunningSteps:
+	case <-shutdownCtx.Done():
 		return 0
 	default:
 		for name, s := range av {
@@ -653,7 +678,7 @@ func runAvailableSteps(dbp zesty.DBProvider, modifiedSteps map[string]bool, res 
 
 				// run
 				stepCopy := *s
-				step.Run(&stepCopy, res.BaseConfigurations, res.Values, stepChan, wg, stopRunningSteps)
+				step.Run(&stepCopy, res.BaseConfigurations, res.Values, stepChan, wg, shutdownCtx)
 			}
 		}
 	}
