@@ -258,7 +258,8 @@ func RunResolution(c *gin.Context, in *runResolutionIn) error {
 		ch <- struct{}{}
 	}()
 
-	chTimeout := time.After(5 * time.Second)
+	timeout := time.NewTicker(5 * time.Second)
+	defer timeout.Stop()
 
 	// manual resolution can be blocked by a lock acquisition on the Execution pool
 	// waiting for 5 seconds to get a response, otherwise let's consider the task will
@@ -266,7 +267,7 @@ func RunResolution(c *gin.Context, in *runResolutionIn) error {
 	select {
 	case <-ch:
 		return err
-	case <-chTimeout:
+	case <-timeout.C:
 		return nil
 	}
 }

@@ -173,14 +173,16 @@ func (c *Cfg) buildLimits() {
 		}
 	}
 
-	maxConcurrentExecutions := defaultMaxConcurrentExecutions
-	if c.MaxConcurrentExecutions != nil {
-		maxConcurrentExecutions = *c.MaxConcurrentExecutions
-	}
-
-	if maxConcurrentExecutions >= 0 {
+	if maxConcurrentExecutions := c.getMaxConcurrentExecutions(); maxConcurrentExecutions >= 0 {
 		c.executionSemaphore = semaphore.NewWeighted(int64(maxConcurrentExecutions))
 	}
+}
+
+func (c *Cfg) getMaxConcurrentExecutions() int {
+	if c.MaxConcurrentExecutions != nil {
+		return *c.MaxConcurrentExecutions
+	}
+	return defaultMaxConcurrentExecutions
 }
 
 var (
@@ -205,7 +207,7 @@ func AcquireResource(ctx context.Context, name string) error {
 	}
 
 	semaphoreCtx := ctx
-	if global.resourceAcquireTimeoutDuration == 0 {
+	if global.resourceAcquireTimeoutDuration != 0 {
 		ctx, cancelFunc := context.WithTimeout(ctx, global.resourceAcquireTimeoutDuration)
 		defer cancelFunc()
 		semaphoreCtx = ctx
@@ -340,6 +342,10 @@ func Config(store *configstore.Store) (*Cfg, error) {
 		App = global.ApplicationName
 
 		global.buildLimits()
+
+		if global.MaxConcurrentExecutionsFromCrashedComputed > global.getMaxConcurrentExecutions() {
+			return nil, errors.New("max_concurrent_executions_from_crashed can't be greater than max_concurrent_executions")
+		}
 	}
 
 	return global, nil

@@ -568,9 +568,9 @@ foreach: '{{.step.prefixStrings.children | toJson}}'
 
 #### Resources <a name="resources"></a>
 
-Resources is a way to limit the number of concurrent execution of tasks or steps within an µTask instance. When a lot of tasks are launched at the same time, a high throughput from µTask can hurt some components of your infrastructure, making them unavailable.
+Resources is a way to limit the number of current execution of tasks or steps within an µTask instance. When a lot of tasks are launched at the same time, a high throughput from µTask can hurt some components of your infrastructure, making them unavailable.
 
-Defining `resources` on a µTask instance, on a template, or a step is a way to limit the number of concurrent executions on µTask side, to make sure that the targetted component stays healthy.
+Defining `resources` on a µTask instance, on a template, or on a step is a way to limit the number of concurrent executions on µTask side, to make sure that the targetted component stays healthy.
 
 µTask comes with some default resources: builtin plugins declares some resources, which can be throttled at usage, in the µTask configuration. For example, the `http` plugin declares two resources: `socket` and `url:example.org` (with `example.org` being the hostname of the destination). If you want to limit the maximum outgoing open socket on a µTask instance, you can add a `resource_limits` for `socket` in the configuration, the value being the number of concurrent usage allowed per instance.
 
@@ -588,9 +588,9 @@ steps:
           foobar: fuzz
 ```
 
-Every time the step `foobar` will be executed, µTask engine will verify that the maximum concurrent limit is not exceeded, and acquire one slot. This slot will be held until the step finishes its execution. If all slots for a resource are held, then the current execution will wait until one slot is released, or if the timeout is reached (defined in `resource_acquire_timeout` configuration, or default `1 minute`). If the resource is not declared in the `resource_limits` configuration, then, no limitation will be applied. If the limit value is set to `0`, then, the step will not wait and will be set to state `TO_RETRY` to be scheduled later.
+Every time the step `foobar` will be executed, µTask engine will verify that the maximum concurrent limit is not exceeded, and acquire one slot. The slot will be hold until the step finishes its execution. If all slots for a resource are hold, then the current execution will wait until one slot is released, or if timeout is reached (defined in `resource_acquire_timeout` configuration, or default `1 minute`). If the resource is not declared in the `resource_limits` configuration, then, no limitation will be applied. If the limitation value is set to `0`, then, the step will not wait, and will be set to state `TO_RETRY` to be schedule later.
 
-Templates declare a builtin resource, named `template:my-template-name` (with `my-template-name` being the template name): this allows to limit the number of concurrent execution of tasks from the given template. In that way, a way that consumes a lot of CPU/RAM/IO can be restrained to save the system resources or to disable completely the execution of tasks from a given template.
+Templates declare a builtin resource, named `template:my-template-name` (with `my-template-name` being the template name): this allows to limit the number of concurrent execution of tasks from the given template. In that way, a way that consumes a lot of CPU/RAM/IO can be restrain to save the system resources, or to disable completely the execution of tasks from a given template.
 
 Each builtin resources are documented in the plugins `README.md` file.
 

@@ -209,30 +209,33 @@ func (e Engine) launchResolution(publicID string, async bool, sm *semaphore.Weig
 
 	res.Values.SetConfig(e.config)
 
-	// checking if all resources are available before starting the resolution
-	// first, checking if we have a custom semaphore, for example, crashed instance recover
-	// putting this semaphore first, cause the crashed instance limitation is always lower than the execution pool
+	// check if all resources are available before starting the resolution
+	// first, check if we have a custom semaphore, for example, a semaphore that limits the concurrent execution of tasks recovery from a crashed instance.
+	// This semaphore needs to go first, because it will always be smaller than the global execution pool.
 	if sm != nil {
 		if err := sm.Acquire(shutdownCtx, 1); err != nil {
 			debugLogger.Debugf("Engine: launchResolution() %s acquire resource: instance is shutting down", res.PublicID)
 			return nil, errors.New("instance is shutting down")
 		}
 	}
-	// second, checking if we have restricted resource on the given template
-	// template could be completely desactivated, as a "dead resource", if it's the case, we need to exit because
-	// the limit won't change until instance rebooted
+	// second, check if we have a resource limit on the current template
+	// template could be completely deactivated as a "dead resource". If it's the case, we need to exit because
+	// the limit won't change until next instance's reboot.
 	if acquiredErr := utask.AcquireResource(shutdownCtx, "template:"+t.TemplateName); acquiredErr != nil {
 		if shutdownCtx.Err() != nil {
 			debugLogger.Debugf("Engine: launchResolution() %s acquire resource: instance is shutting down", res.PublicID)
 			return nil, errors.New("instance is shutting down")
 		}
-		debugLogger.Debugf("Engine: launchResolution() %s acquire resource %q: failed to acquire resource", res.PublicID, "template:"+t.TemplateName)
+		debugLogger.Debugf("Engine: launchResolution() %s acquire resource %q: failed to acquire resource: %s", res.PublicID, "template:"+t.TemplateName, err)
 		// otherwise, we either reached timeout on the lock for template, or the template is a "dead resource"
 		t.SetState(task.StateBlocked)
 		res.SetNextRetry(time.Now().Add(10 * time.Minute))
 		res.SetState(resolution.StateToAutorunDelayed)
 		if err := commit(dbp, res, t); err != nil {
 			debugLogger.Debugf("Engine: launchResolution() %s acquire resource, FAILED TO COMMIT RESOLUTION: %s", res.PublicID, err)
+		}
+		if sm != nil {
+			sm.Release(1)
 		}
 		return nil, fmt.Errorf("can't acquire lock for template %q: %s", t.TemplateName, err)
 	}
